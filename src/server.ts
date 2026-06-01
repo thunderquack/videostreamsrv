@@ -176,6 +176,7 @@ async function cleanupRemovedThumbnails(previousItems: LibraryItem[], currentIte
   for (const item of previousItems) {
     if (!currentIds.has(item.id)) {
       await fs.promises.rm(path.join(config.thumbnailsPath, `${item.id}.jpg`), { force: true });
+      await fs.promises.rm(path.join(config.thumbnailsPath, `${item.id}.json`), { force: true });
     }
   }
 }

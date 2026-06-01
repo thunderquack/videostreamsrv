@@ -68,3 +68,10 @@ export interface HlsCacheMetadata {
   size: number;
   modifiedAt: string;
 }
+
+export interface ThumbnailCacheMetadata {
+  sourcePath: string;
+  size: number;
+  modifiedAt: string;
+  timestampSeconds: number;
+}

@@ -3,7 +3,7 @@ import path from "node:path";
 
 import config from "./config";
 import { ensureThumbnail, probeDuration } from "./ffmpeg";
-import type { LibraryItem, LibraryStatus } from "./types";
+import type { LibraryItem, LibraryStatus, ThumbnailCacheMetadata } from "./types";
 import { createVideoId, formatDuration, isVideoFile, supportsDirectPlay } from "./video-utils";
 
 export default class VideoLibrary {
@@ -33,10 +33,27 @@ export default class VideoLibrary {
       const thumbnailPath = path.join(config.thumbnailsPath, `${id}.jpg`);
       const durationSeconds = await probeDuration(absolutePath);
       const thumbnailTimestamp = getThumbnailTimestamp(durationSeconds);
+      const thumbnailMetadataPath = path.join(config.thumbnailsPath, `${id}.json`);
 
-      if (await shouldGenerateThumbnail(thumbnailPath, stats.mtimeMs)) {
+      if (
+        await shouldGenerateThumbnail(
+          thumbnailPath,
+          thumbnailMetadataPath,
+          absolutePath,
+          stats.size,
+          stats.mtime.toISOString(),
+          thumbnailTimestamp
+        )
+      ) {
         try {
           await ensureThumbnail(absolutePath, thumbnailPath, thumbnailTimestamp);
+          await writeThumbnailMetadata(
+            thumbnailMetadataPath,
+            absolutePath,
+            stats.size,
+            stats.mtime.toISOString(),
+            thumbnailTimestamp
+          );
         } catch {
           // Keep the item even if thumbnail generation fails.
         }
@@ -87,10 +104,25 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
-async function shouldGenerateThumbnail(thumbnailPath: string, sourceMtimeMs: number): Promise<boolean> {
+async function shouldGenerateThumbnail(
+  thumbnailPath: string,
+  thumbnailMetadataPath: string,
+  sourcePath: string,
+  sourceSize: number,
+  sourceModifiedAt: string,
+  timestampSeconds: number
+): Promise<boolean> {
   try {
-    const thumbnailStats = await fs.stat(thumbnailPath);
-    return thumbnailStats.mtimeMs < sourceMtimeMs;
+    await fs.access(thumbnailPath);
+    const metadataRaw = await fs.readFile(thumbnailMetadataPath, "utf8");
+    const metadata = JSON.parse(metadataRaw) as ThumbnailCacheMetadata;
+
+    return !(
+      metadata.sourcePath === sourcePath &&
+      metadata.size === sourceSize &&
+      metadata.modifiedAt === sourceModifiedAt &&
+      Math.abs(metadata.timestampSeconds - timestampSeconds) < 0.01
+    );
   } catch {
     return true;
   }
@@ -102,4 +134,21 @@ function getThumbnailTimestamp(durationSeconds: number | null): number {
   }
 
   return config.thumbnailTimestamp;
+}
+
+async function writeThumbnailMetadata(
+  thumbnailMetadataPath: string,
+  sourcePath: string,
+  sourceSize: number,
+  sourceModifiedAt: string,
+  timestampSeconds: number
+): Promise<void> {
+  const metadata: ThumbnailCacheMetadata = {
+    sourcePath,
+    size: sourceSize,
+    modifiedAt: sourceModifiedAt,
+    timestampSeconds
+  };
+
+  await fs.writeFile(thumbnailMetadataPath, JSON.stringify(metadata), "utf8");
 }
