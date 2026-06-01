@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Video Stream Server</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js" defer></script>
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main class="layout">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Local video shelf</p>
+          <h1>Video Stream Server</h1>
+        </div>
+        <button id="rescanButton" class="ghost">Rescan</button>
+      </header>
+      <section id="status" class="status"></section>
+      <section id="gallery" class="gallery"></section>
+    </main>
+
+    <div id="playerModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="true"></div>
+      <div class="modal-panel">
+        <button class="close" id="closeButton" aria-label="Close player">Close</button>
+        <div class="player-header">
+          <h2 id="playerTitle"></h2>
+          <p id="playerMeta"></p>
+        </div>
+        <video id="player" controls playsinline></video>
+        <p id="playerMode" class="player-mode"></p>
+      </div>
+    </div>
+  </body>
+</html>
