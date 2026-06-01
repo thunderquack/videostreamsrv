@@ -11,6 +11,7 @@
   var playerMeta = getRequiredElement("playerMeta");
   var playerMode = getRequiredElement("playerMode");
   var currentHls = null;
+  var currentPlaybackRequest = 0;
   async function loadVideos() {
     setStatus("Loading library...");
     const response = await fetch("/api/videos");
@@ -51,7 +52,7 @@
       </div>
       <div class="card-content">
         <h2 class="card-title">${escapeHtml(item.filename)}</h2>
-        <p class="card-meta">${item.durationLabel || "Unknown duration"}${item.directPlaySupported ? " \u2022 Direct play" : " \u2022 HLS fallback"}</p>
+        <p class="card-meta">${item.durationLabel || "Unknown duration"}${item.directPlaySupported ? " \u2022 Direct play" : item.fallbackPreparing ? " \u2022 Preparing HLS" : item.fallbackStatus === "error" ? " \u2022 HLS error" : " \u2022 HLS fallback"}</p>
         <button class="play-button" data-video-id="${item.id}">Play</button>
       </div>
     </article>
@@ -67,6 +68,8 @@
     }
   }
   async function openPlayer(item) {
+    currentPlaybackRequest += 1;
+    const requestId = currentPlaybackRequest;
     destroyHls();
     player.pause();
     player.removeAttribute("src");
@@ -91,6 +94,16 @@
     }
     if (!item.hlsUrl) {
       playerMode.textContent = "No compatible playback mode available";
+      return;
+    }
+    if (!item.fallbackReady) {
+      playerMode.textContent = item.fallbackPreparing ? "Preparing full video for seeking..." : "Waiting for HLS fallback to become ready...";
+      const readyItem = await waitForFallbackReady(item.id, requestId);
+      if (!readyItem) {
+        return;
+      }
+      playerMode.textContent = "Starting HLS fallback";
+      await startHls(readyItem.hlsUrl || item.hlsUrl);
       return;
     }
     playerMode.textContent = "Starting HLS fallback";
@@ -118,6 +131,7 @@
     playerMode.textContent = "Browser does not support HLS playback";
   }
   function closePlayer() {
+    currentPlaybackRequest += 1;
     destroyHls();
     player.pause();
     player.removeAttribute("src");
@@ -130,6 +144,29 @@
       currentHls.destroy();
       currentHls = null;
     }
+  }
+  async function waitForFallbackReady(id, requestId) {
+    while (requestId === currentPlaybackRequest && !modal.classList.contains("hidden")) {
+      const response = await fetch("/api/videos");
+      const payload = await response.json();
+      const item = payload.items.find((entry) => entry.id === id);
+      if (!item) {
+        playerMode.textContent = "Video is no longer available";
+        return null;
+      }
+      if (item.fallbackStatus === "error") {
+        playerMode.textContent = "Failed to prepare fallback video";
+        return null;
+      }
+      if (item.fallbackReady && item.hlsUrl) {
+        return item;
+      }
+      await delay(2e3);
+    }
+    return null;
+  }
+  function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
   function escapeHtml(value) {
     return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");

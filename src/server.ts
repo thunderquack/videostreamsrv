@@ -8,7 +8,7 @@ import morgan from "morgan";
 import config from "./config";
 import HlsManager from "./hls-manager";
 import VideoLibrary from "./library";
-import type { HealthResponse, VideosResponse } from "./types";
+import type { HealthResponse, LibraryItem, PublicLibraryItem, VideosResponse } from "./types";
 
 async function main(): Promise<void> {
   const app = express();
@@ -16,6 +16,7 @@ async function main(): Promise<void> {
   const hlsManager = new HlsManager();
 
   await library.init();
+  await hlsManager.sync(library.getItems());
 
   app.use(morgan("dev"));
   app.use(express.json());
@@ -24,7 +25,7 @@ async function main(): Promise<void> {
 
   app.get("/api/videos", (_req: Request, res: Response<VideosResponse>) => {
     res.json({
-      items: library.getPublicItems(),
+      items: serializeItems(library.getItems(), hlsManager),
       status: library.getStatus()
     });
   });
@@ -32,8 +33,9 @@ async function main(): Promise<void> {
   app.post("/api/rescan", async (_req: Request, res: Response<VideosResponse>, next: NextFunction) => {
     try {
       const items = await library.scan();
+      await hlsManager.sync(items);
       res.json({
-        items,
+        items: serializeItems(items, hlsManager),
         status: library.getStatus()
       });
     } catch (error) {
@@ -75,7 +77,12 @@ async function main(): Promise<void> {
       res.type("application/vnd.apple.mpegurl");
       fs.createReadStream(playlistPath).pipe(res);
     } catch (error) {
-      next(error);
+      const message = error instanceof Error ? error.message : "HLS playlist is not ready yet";
+      const status = message.includes("not ready yet") ? 409 : 500;
+      res.status(status).json({
+        error: status === 409 ? "Fallback is still preparing" : "Internal server error",
+        detail: message
+      });
     }
   });
 
@@ -107,6 +114,28 @@ async function main(): Promise<void> {
   app.listen(config.port, () => {
     console.log(`Video server listening on http://localhost:${config.port}`);
     console.log(`Library path: ${config.videoLibraryPath}`);
+  });
+}
+
+function serializeItems(items: LibraryItem[], hlsManager: HlsManager): PublicLibraryItem[] {
+  return items.map((item) => {
+    const fallbackStatus = hlsManager.getState(item);
+
+    return {
+      id: item.id,
+      filename: item.filename,
+      size: item.size,
+      modifiedAt: item.modifiedAt,
+      durationSeconds: item.durationSeconds,
+      durationLabel: item.durationLabel,
+      directPlaySupported: item.directPlaySupported,
+      thumbnailUrl: item.thumbnailExists ? `/thumbs/${item.id}.jpg` : null,
+      streamUrl: `/stream/${item.id}`,
+      hlsUrl: config.hlsEnabled ? `/hls/${item.id}/master.m3u8` : null,
+      fallbackStatus,
+      fallbackReady: fallbackStatus === "ready" || fallbackStatus === "not_needed",
+      fallbackPreparing: fallbackStatus === "preparing"
+    };
   });
 }
 

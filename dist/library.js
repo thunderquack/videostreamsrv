@@ -56,21 +56,10 @@ class VideoLibrary {
         this.items = items;
         this.byId = new Map(items.map((item) => [item.id, item]));
         this.lastScanAt = new Date().toISOString();
-        return this.getPublicItems();
+        return this.getItems();
     }
-    getPublicItems() {
-        return this.items.map((item) => ({
-            id: item.id,
-            filename: item.filename,
-            size: item.size,
-            modifiedAt: item.modifiedAt,
-            durationSeconds: item.durationSeconds,
-            durationLabel: item.durationLabel,
-            directPlaySupported: item.directPlaySupported,
-            thumbnailUrl: item.thumbnailExists ? `/thumbs/${item.id}.jpg` : null,
-            streamUrl: `/stream/${item.id}`,
-            hlsUrl: config_1.default.hlsEnabled ? `/hls/${item.id}/master.m3u8` : null
-        }));
+    getItems() {
+        return this.items.map((item) => ({ ...item }));
     }
     getItem(id) {
         return this.byId.get(id) || null;

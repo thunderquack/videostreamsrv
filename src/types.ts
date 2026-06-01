@@ -20,6 +20,8 @@ export interface LibraryItem {
   thumbnailExists: boolean;
 }
 
+export type FallbackStatus = "not_needed" | "preparing" | "ready" | "error";
+
 export interface PublicLibraryItem {
   id: string;
   filename: string;
@@ -31,6 +33,9 @@ export interface PublicLibraryItem {
   thumbnailUrl: string | null;
   streamUrl: string;
   hlsUrl: string | null;
+  fallbackStatus: FallbackStatus;
+  fallbackReady: boolean;
+  fallbackPreparing: boolean;
 }
 
 export interface LibraryStatus {
@@ -49,4 +54,10 @@ export interface HealthResponse extends LibraryStatus {
 
 export interface HlsJob {
   ready: Promise<void>;
+}
+
+export interface HlsCacheMetadata {
+  sourcePath: string;
+  size: number;
+  modifiedAt: string;
 }

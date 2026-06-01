@@ -16,21 +16,23 @@ async function main() {
     const library = new library_1.default();
     const hlsManager = new hls_manager_1.default();
     await library.init();
+    await hlsManager.sync(library.getItems());
     app.use((0, morgan_1.default)("dev"));
     app.use(express_1.default.json());
     app.use(express_1.default.static(node_path_1.default.join(__dirname, "..", "public")));
     app.use("/thumbs", express_1.default.static(config_1.default.thumbnailsPath, { fallthrough: false }));
     app.get("/api/videos", (_req, res) => {
         res.json({
-            items: library.getPublicItems(),
+            items: serializeItems(library.getItems(), hlsManager),
             status: library.getStatus()
         });
     });
     app.post("/api/rescan", async (_req, res, next) => {
         try {
             const items = await library.scan();
+            await hlsManager.sync(items);
             res.json({
-                items,
+                items: serializeItems(items, hlsManager),
                 status: library.getStatus()
             });
         }
@@ -68,7 +70,12 @@ async function main() {
             node_fs_1.default.createReadStream(playlistPath).pipe(res);
         }
         catch (error) {
-            next(error);
+            const message = error instanceof Error ? error.message : "HLS playlist is not ready yet";
+            const status = message.includes("not ready yet") ? 409 : 500;
+            res.status(status).json({
+                error: status === 409 ? "Fallback is still preparing" : "Internal server error",
+                detail: message
+            });
         }
     });
     app.get("/hls/:id/:segment", (req, res) => {
@@ -95,6 +102,26 @@ async function main() {
     app.listen(config_1.default.port, () => {
         console.log(`Video server listening on http://localhost:${config_1.default.port}`);
         console.log(`Library path: ${config_1.default.videoLibraryPath}`);
+    });
+}
+function serializeItems(items, hlsManager) {
+    return items.map((item) => {
+        const fallbackStatus = hlsManager.getState(item);
+        return {
+            id: item.id,
+            filename: item.filename,
+            size: item.size,
+            modifiedAt: item.modifiedAt,
+            durationSeconds: item.durationSeconds,
+            durationLabel: item.durationLabel,
+            directPlaySupported: item.directPlaySupported,
+            thumbnailUrl: item.thumbnailExists ? `/thumbs/${item.id}.jpg` : null,
+            streamUrl: `/stream/${item.id}`,
+            hlsUrl: config_1.default.hlsEnabled ? `/hls/${item.id}/master.m3u8` : null,
+            fallbackStatus,
+            fallbackReady: fallbackStatus === "ready" || fallbackStatus === "not_needed",
+            fallbackPreparing: fallbackStatus === "preparing"
+        };
     });
 }
 function serveRangeFile(filePath, res, rangeHeader) {

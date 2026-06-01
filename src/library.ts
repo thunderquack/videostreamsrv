@@ -3,7 +3,7 @@ import path from "node:path";
 
 import config from "./config";
 import { ensureThumbnail, probeDuration } from "./ffmpeg";
-import type { LibraryItem, LibraryStatus, PublicLibraryItem } from "./types";
+import type { LibraryItem, LibraryStatus } from "./types";
 import { createVideoId, formatDuration, isVideoFile, supportsDirectPlay } from "./video-utils";
 
 export default class VideoLibrary {
@@ -21,7 +21,7 @@ export default class VideoLibrary {
     await this.scan();
   }
 
-  async scan(): Promise<PublicLibraryItem[]> {
+  async scan(): Promise<LibraryItem[]> {
     const entries = await fs.readdir(config.videoLibraryPath, { withFileTypes: true });
     const files = entries.filter((entry) => entry.isFile() && isVideoFile(entry.name));
     const items: LibraryItem[] = [];
@@ -60,22 +60,11 @@ export default class VideoLibrary {
     this.items = items;
     this.byId = new Map(items.map((item) => [item.id, item]));
     this.lastScanAt = new Date().toISOString();
-    return this.getPublicItems();
+    return this.getItems();
   }
 
-  getPublicItems(): PublicLibraryItem[] {
-    return this.items.map((item) => ({
-      id: item.id,
-      filename: item.filename,
-      size: item.size,
-      modifiedAt: item.modifiedAt,
-      durationSeconds: item.durationSeconds,
-      durationLabel: item.durationLabel,
-      directPlaySupported: item.directPlaySupported,
-      thumbnailUrl: item.thumbnailExists ? `/thumbs/${item.id}.jpg` : null,
-      streamUrl: `/stream/${item.id}`,
-      hlsUrl: config.hlsEnabled ? `/hls/${item.id}/master.m3u8` : null
-    }));
+  getItems(): LibraryItem[] {
+    return this.items.map((item) => ({ ...item }));
   }
 
   getItem(id: string): LibraryItem | null {

@@ -6,6 +6,11 @@ interface ProcessResult {
   stderr: string;
 }
 
+interface HlsProcess {
+  process: ChildProcessByStdio<null, Readable, Readable>;
+  done: Promise<void>;
+}
+
 function runProcess(command: string, args: string[]): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -69,11 +74,8 @@ export async function ensureThumbnail(inputPath: string, outputPath: string, tim
   ]);
 }
 
-export function spawnHls(
-  inputPath: string,
-  outputPlaylistPath: string
-): ChildProcessByStdio<null, Readable, Readable> {
-  return spawn(
+export function spawnHls(inputPath: string, outputPlaylistPath: string): HlsProcess {
+  const child = spawn(
     "ffmpeg",
     [
       "-y",
@@ -85,14 +87,20 @@ export function spawnHls(
       "aac",
       "-preset",
       "veryfast",
-      "-movflags",
-      "+faststart",
+      "-force_key_frames",
+      "expr:gte(t,n_forced*6)",
+      "-sc_threshold",
+      "0",
       "-f",
       "hls",
       "-hls_time",
       "6",
       "-hls_list_size",
       "0",
+      "-hls_playlist_type",
+      "vod",
+      "-hls_flags",
+      "independent_segments",
       "-hls_segment_filename",
       outputPlaylistPath.replace("master.m3u8", "segment-%03d.ts"),
       outputPlaylistPath
@@ -101,4 +109,26 @@ export function spawnHls(
       stdio: ["ignore", "pipe", "pipe"]
     }
   );
+
+  let stderr = "";
+  child.stderr.on("data", (chunk: Buffer) => {
+    stderr += chunk.toString();
+  });
+
+  const done = new Promise<void>((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      reject(new Error(`ffmpeg exited with code ${code}: ${stderr}`));
+    });
+  });
+
+  return {
+    process: child,
+    done
+  };
 }

@@ -9,6 +9,9 @@ interface PublicLibraryItem {
   thumbnailUrl: string | null;
   streamUrl: string;
   hlsUrl: string | null;
+  fallbackStatus: "not_needed" | "preparing" | "ready" | "error";
+  fallbackReady: boolean;
+  fallbackPreparing: boolean;
 }
 
 interface LibraryStatus {
@@ -55,6 +58,7 @@ const playerMeta = getRequiredElement<HTMLElement>("playerMeta");
 const playerMode = getRequiredElement<HTMLElement>("playerMode");
 
 let currentHls: HlsInstance | null = null;
+let currentPlaybackRequest = 0;
 
 async function loadVideos(): Promise<void> {
   setStatus("Loading library...");
@@ -109,7 +113,13 @@ function renderGallery(items: PublicLibraryItem[]): void {
       <div class="card-content">
         <h2 class="card-title">${escapeHtml(item.filename)}</h2>
         <p class="card-meta">${item.durationLabel || "Unknown duration"}${
-          item.directPlaySupported ? " • Direct play" : " • HLS fallback"
+          item.directPlaySupported
+            ? " • Direct play"
+            : item.fallbackPreparing
+              ? " • Preparing HLS"
+              : item.fallbackStatus === "error"
+                ? " • HLS error"
+                : " • HLS fallback"
         }</p>
         <button class="play-button" data-video-id="${item.id}">Play</button>
       </div>
@@ -129,6 +139,8 @@ function renderGallery(items: PublicLibraryItem[]): void {
 }
 
 async function openPlayer(item: PublicLibraryItem): Promise<void> {
+  currentPlaybackRequest += 1;
+  const requestId = currentPlaybackRequest;
   destroyHls();
   player.pause();
   player.removeAttribute("src");
@@ -157,6 +169,20 @@ async function openPlayer(item: PublicLibraryItem): Promise<void> {
 
   if (!item.hlsUrl) {
     playerMode.textContent = "No compatible playback mode available";
+    return;
+  }
+
+  if (!item.fallbackReady) {
+    playerMode.textContent = item.fallbackPreparing
+      ? "Preparing full video for seeking..."
+      : "Waiting for HLS fallback to become ready...";
+    const readyItem = await waitForFallbackReady(item.id, requestId);
+    if (!readyItem) {
+      return;
+    }
+
+    playerMode.textContent = "Starting HLS fallback";
+    await startHls(readyItem.hlsUrl || item.hlsUrl);
     return;
   }
 
@@ -190,6 +216,7 @@ async function startHls(url: string): Promise<void> {
 }
 
 function closePlayer(): void {
+  currentPlaybackRequest += 1;
   destroyHls();
   player.pause();
   player.removeAttribute("src");
@@ -203,6 +230,36 @@ function destroyHls(): void {
     currentHls.destroy();
     currentHls = null;
   }
+}
+
+async function waitForFallbackReady(id: string, requestId: number): Promise<PublicLibraryItem | null> {
+  while (requestId === currentPlaybackRequest && !modal.classList.contains("hidden")) {
+    const response = await fetch("/api/videos");
+    const payload = (await response.json()) as VideosResponse;
+    const item = payload.items.find((entry) => entry.id === id);
+
+    if (!item) {
+      playerMode.textContent = "Video is no longer available";
+      return null;
+    }
+
+    if (item.fallbackStatus === "error") {
+      playerMode.textContent = "Failed to prepare fallback video";
+      return null;
+    }
+
+    if (item.fallbackReady && item.hlsUrl) {
+      return item;
+    }
+
+    await delay(2000);
+  }
+
+  return null;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function escapeHtml(value: string): string {

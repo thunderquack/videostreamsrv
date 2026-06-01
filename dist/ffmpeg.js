@@ -60,7 +60,7 @@ async function ensureThumbnail(inputPath, outputPath, timestamp) {
     ]);
 }
 function spawnHls(inputPath, outputPlaylistPath) {
-    return (0, node_child_process_1.spawn)("ffmpeg", [
+    const child = (0, node_child_process_1.spawn)("ffmpeg", [
         "-y",
         "-i",
         inputPath,
@@ -70,18 +70,42 @@ function spawnHls(inputPath, outputPlaylistPath) {
         "aac",
         "-preset",
         "veryfast",
-        "-movflags",
-        "+faststart",
+        "-force_key_frames",
+        "expr:gte(t,n_forced*6)",
+        "-sc_threshold",
+        "0",
         "-f",
         "hls",
         "-hls_time",
         "6",
         "-hls_list_size",
         "0",
+        "-hls_playlist_type",
+        "vod",
+        "-hls_flags",
+        "independent_segments",
         "-hls_segment_filename",
         outputPlaylistPath.replace("master.m3u8", "segment-%03d.ts"),
         outputPlaylistPath
     ], {
         stdio: ["ignore", "pipe", "pipe"]
     });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+    });
+    const done = new Promise((resolve, reject) => {
+        child.on("error", reject);
+        child.on("close", (code) => {
+            if (code === 0) {
+                resolve();
+                return;
+            }
+            reject(new Error(`ffmpeg exited with code ${code}: ${stderr}`));
+        });
+    });
+    return {
+        process: child,
+        done
+    };
 }
