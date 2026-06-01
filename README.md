@@ -16,7 +16,7 @@ Simple local video streaming server for a small personal library.
 docker compose up --build
 ```
 
-Open `http://localhost:3000`.
+Open `http://localhost/`.
 
 Put your videos into `./videos` or mount another folder in `docker-compose.yml`.
 
@@ -24,6 +24,7 @@ Put your videos into `./videos` or mount another folder in `docker-compose.yml`.
 
 ```bash
 npm install
+npm run build
 npm start
 ```
 
@@ -34,3 +35,16 @@ Environment variables:
 - `CACHE_PATH`
 - `THUMBNAIL_TIMESTAMP`
 - `HLS_ENABLED`
+
+## Development
+
+```bash
+npm install
+npm run dev
+```
+
+Type checking:
+
+```bash
+npm run typecheck
+```

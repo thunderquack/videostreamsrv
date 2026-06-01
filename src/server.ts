@@ -1,15 +1,16 @@
-const fs = require("fs");
-const path = require("path");
+import fs from "node:fs";
+import path from "node:path";
 
-const express = require("express");
-const mime = require("mime-types");
-const morgan = require("morgan");
+import express, { type NextFunction, type Request, type Response } from "express";
+import mime from "mime-types";
+import morgan from "morgan";
 
-const config = require("./config");
-const VideoLibrary = require("./library");
-const HlsManager = require("./hls-manager");
+import config from "./config";
+import HlsManager from "./hls-manager";
+import VideoLibrary from "./library";
+import type { HealthResponse, VideosResponse } from "./types";
 
-async function main() {
+async function main(): Promise<void> {
   const app = express();
   const library = new VideoLibrary();
   const hlsManager = new HlsManager();
@@ -21,14 +22,14 @@ async function main() {
   app.use(express.static(path.join(__dirname, "..", "public")));
   app.use("/thumbs", express.static(config.thumbnailsPath, { fallthrough: false }));
 
-  app.get("/api/videos", (_req, res) => {
+  app.get("/api/videos", (_req: Request, res: Response<VideosResponse>) => {
     res.json({
       items: library.getPublicItems(),
       status: library.getStatus()
     });
   });
 
-  app.post("/api/rescan", async (_req, res, next) => {
+  app.post("/api/rescan", async (_req: Request, res: Response<VideosResponse>, next: NextFunction) => {
     try {
       const items = await library.scan();
       res.json({
@@ -40,14 +41,14 @@ async function main() {
     }
   });
 
-  app.get("/health", (_req, res) => {
+  app.get("/health", (_req: Request, res: Response<HealthResponse>) => {
     res.json({
       ok: true,
       ...library.getStatus()
     });
   });
 
-  app.get("/stream/:id", (req, res) => {
+  app.get("/stream/:id", (req: Request<{ id: string }>, res: Response) => {
     const video = library.getItem(req.params.id);
     if (!video) {
       res.status(404).json({ error: "Video not found" });
@@ -57,7 +58,7 @@ async function main() {
     serveRangeFile(video.path, res, req.headers.range);
   });
 
-  app.get("/hls/:id/master.m3u8", async (req, res, next) => {
+  app.get("/hls/:id/master.m3u8", async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
     if (!config.hlsEnabled) {
       res.status(404).json({ error: "HLS is disabled" });
       return;
@@ -78,10 +79,10 @@ async function main() {
     }
   });
 
-  app.get("/hls/:id/:segment", async (req, res) => {
-    const baseDir = path.join(config.hlsPath, req.params.id);
+  app.get("/hls/:id/:segment", (req: Request<{ id: string; segment: string }>, res: Response) => {
+    const baseDir = path.resolve(path.join(config.hlsPath, req.params.id));
     const segmentPath = path.resolve(baseDir, req.params.segment);
-    if (!segmentPath.startsWith(path.resolve(baseDir))) {
+    if (!segmentPath.startsWith(baseDir)) {
       res.status(400).json({ error: "Invalid segment path" });
       return;
     }
@@ -95,7 +96,7 @@ async function main() {
     fs.createReadStream(segmentPath).pipe(res);
   });
 
-  app.use((error, _req, res, _next) => {
+  app.use((error: Error, _req: Request, res: Response, _next: NextFunction) => {
     console.error(error);
     res.status(500).json({
       error: "Internal server error",
@@ -109,7 +110,7 @@ async function main() {
   });
 }
 
-function serveRangeFile(filePath, res, rangeHeader) {
+function serveRangeFile(filePath: string, res: Response, rangeHeader: string | undefined): void {
   const stat = fs.statSync(filePath);
   const contentType = mime.lookup(filePath) || "application/octet-stream";
 
@@ -142,7 +143,7 @@ function serveRangeFile(filePath, res, rangeHeader) {
   fs.createReadStream(filePath, { start, end }).pipe(res);
 }
 
-main().catch((error) => {
+void main().catch((error: Error) => {
   console.error(error);
   process.exitCode = 1;
 });

@@ -1,15 +1,16 @@
-const fs = require("fs/promises");
-const path = require("path");
+import fs from "node:fs/promises";
+import path from "node:path";
+import type { ChildProcessByStdio } from "node:child_process";
+import type { Readable } from "node:stream";
 
-const config = require("./config");
-const { spawnHls } = require("./ffmpeg");
+import config from "./config";
+import { spawnHls } from "./ffmpeg";
+import type { HlsJob, LibraryItem } from "./types";
 
-class HlsManager {
-  constructor() {
-    this.jobs = new Map();
-  }
+export default class HlsManager {
+  private jobs = new Map<string, HlsJob>();
 
-  async ensureReady(video) {
+  async ensureReady(video: LibraryItem): Promise<{ outputDir: string; playlistPath: string }> {
     const outputDir = path.join(config.hlsPath, video.id);
     const playlistPath = path.join(outputDir, "master.m3u8");
     await fs.mkdir(outputDir, { recursive: true });
@@ -31,7 +32,7 @@ class HlsManager {
     return { outputDir, playlistPath };
   }
 
-  createJob(inputPath, playlistPath, id) {
+  private createJob(inputPath: string, playlistPath: string, id: string): HlsJob {
     const child = spawnHls(inputPath, playlistPath);
     const ready = waitForPlaylist(playlistPath, child);
 
@@ -43,11 +44,14 @@ class HlsManager {
       this.jobs.delete(id);
     });
 
-    return { child, ready };
+    return { ready };
   }
 }
 
-async function waitForPlaylist(playlistPath, child) {
+async function waitForPlaylist(
+  playlistPath: string,
+  child: ChildProcessByStdio<null, Readable, Readable>
+): Promise<void> {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < 30000) {
@@ -65,5 +69,3 @@ async function waitForPlaylist(playlistPath, child) {
 
   throw new Error("Timed out waiting for HLS playlist");
 }
-
-module.exports = HlsManager;

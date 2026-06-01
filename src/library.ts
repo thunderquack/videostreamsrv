@@ -1,18 +1,19 @@
-const fs = require("fs/promises");
-const path = require("path");
+import fs from "node:fs/promises";
+import path from "node:path";
 
-const config = require("./config");
-const { ensureThumbnail, probeDuration } = require("./ffmpeg");
-const { createVideoId, formatDuration, isVideoFile, supportsDirectPlay } = require("./video-utils");
+import config from "./config";
+import { ensureThumbnail, probeDuration } from "./ffmpeg";
+import type { LibraryItem, LibraryStatus, PublicLibraryItem } from "./types";
+import { createVideoId, formatDuration, isVideoFile, supportsDirectPlay } from "./video-utils";
 
-class VideoLibrary {
-  constructor() {
-    this.items = [];
-    this.byId = new Map();
-    this.lastScanAt = null;
-  }
+export default class VideoLibrary {
+  private items: LibraryItem[] = [];
 
-  async init() {
+  private byId = new Map<string, LibraryItem>();
+
+  private lastScanAt: string | null = null;
+
+  async init(): Promise<void> {
     await fs.mkdir(config.cachePath, { recursive: true });
     await fs.mkdir(config.thumbnailsPath, { recursive: true });
     await fs.mkdir(config.hlsPath, { recursive: true });
@@ -20,17 +21,16 @@ class VideoLibrary {
     await this.scan();
   }
 
-  async scan() {
+  async scan(): Promise<PublicLibraryItem[]> {
     const entries = await fs.readdir(config.videoLibraryPath, { withFileTypes: true });
     const files = entries.filter((entry) => entry.isFile() && isVideoFile(entry.name));
-    const items = [];
+    const items: LibraryItem[] = [];
 
     for (const file of files) {
       const absolutePath = path.join(config.videoLibraryPath, file.name);
       const stats = await fs.stat(absolutePath);
       const id = createVideoId(file.name);
-      const thumbnailFilename = `${id}.jpg`;
-      const thumbnailPath = path.join(config.thumbnailsPath, thumbnailFilename);
+      const thumbnailPath = path.join(config.thumbnailsPath, `${id}.jpg`);
       const durationSeconds = await probeDuration(absolutePath);
 
       try {
@@ -63,7 +63,7 @@ class VideoLibrary {
     return this.getPublicItems();
   }
 
-  getPublicItems() {
+  getPublicItems(): PublicLibraryItem[] {
     return this.items.map((item) => ({
       id: item.id,
       filename: item.filename,
@@ -78,11 +78,11 @@ class VideoLibrary {
     }));
   }
 
-  getItem(id) {
+  getItem(id: string): LibraryItem | null {
     return this.byId.get(id) || null;
   }
 
-  getStatus() {
+  getStatus(): LibraryStatus {
     return {
       videoCount: this.items.length,
       lastScanAt: this.lastScanAt
@@ -90,7 +90,7 @@ class VideoLibrary {
   }
 }
 
-async function fileExists(filePath) {
+async function fileExists(filePath: string): Promise<boolean> {
   try {
     await fs.access(filePath);
     return true;
@@ -98,5 +98,3 @@ async function fileExists(filePath) {
     return false;
   }
 }
-
-module.exports = VideoLibrary;

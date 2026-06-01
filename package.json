@@ -3,14 +3,30 @@
   "version": "1.0.0",
   "private": true,
   "description": "Simple local video streaming server",
-  "main": "src/server.js",
+  "main": "dist/server.js",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "esbuild src/client/app.ts --bundle --platform=browser --format=iife --target=es2020 --outfile=public/app.js",
+    "build:server": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "concurrently \"npm:dev:client\" \"npm:dev:server\"",
+    "dev:client": "esbuild src/client/app.ts --bundle --platform=browser --format=iife --target=es2020 --outfile=public/app.js --watch",
+    "dev:server": "tsx watch src/server.ts"
   },
   "dependencies": {
     "express": "^5.1.0",
     "mime-types": "^3.0.1",
     "morgan": "^1.10.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/mime-types": "^3.0.1",
+    "@types/morgan": "^1.9.10",
+    "@types/node": "^24.10.1",
+    "concurrently": "^9.2.1",
+    "esbuild": "^0.27.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
   }
 }
