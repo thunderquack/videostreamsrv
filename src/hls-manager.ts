@@ -113,10 +113,20 @@ export default class HlsManager {
           throw new Error("Generated HLS playlist is incomplete");
         }
 
+        if (!this.videos.has(video.id)) {
+          await fs.rm(outputDir, { recursive: true, force: true });
+          return;
+        }
+
         await this.writeMetadata(video);
         this.setState(video.id, "ready", 100, null);
       })
       .catch(async (error: unknown) => {
+        if (!this.videos.has(video.id)) {
+          await fs.rm(outputDir, { recursive: true, force: true });
+          return;
+        }
+
         this.setState(video.id, "error", 0, error instanceof Error ? error.message : "HLS generation failed");
         await fs.rm(outputDir, { recursive: true, force: true });
       })

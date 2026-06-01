@@ -138,6 +138,13 @@ h1 {
   font-weight: 700;
 }
 
+.play-button.is-disabled,
+.play-button:disabled {
+  cursor: not-allowed;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.08));
+  color: rgba(255, 255, 255, 0.7);
+}
+
 .modal {
   position: fixed;
   inset: 0;
