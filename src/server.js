@@ -79,8 +79,9 @@ async function main() {
   });
 
   app.get("/hls/:id/:segment", async (req, res) => {
-    const segmentPath = path.join(config.hlsPath, req.params.id, req.params.segment);
-    if (!segmentPath.startsWith(path.join(config.hlsPath, req.params.id))) {
+    const baseDir = path.join(config.hlsPath, req.params.id);
+    const segmentPath = path.resolve(baseDir, req.params.segment);
+    if (!segmentPath.startsWith(path.resolve(baseDir))) {
       res.status(400).json({ error: "Invalid segment path" });
       return;
     }
