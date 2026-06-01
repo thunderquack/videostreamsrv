@@ -10,6 +10,8 @@ export default class HlsManager {
 
   private states = new Map<string, FallbackStatus>();
 
+  private errors = new Map<string, string>();
+
   async sync(videos: LibraryItem[]): Promise<void> {
     const knownIds = new Set(videos.map((video) => video.id));
     await this.cleanupRemovedEntries(knownIds);
@@ -17,6 +19,7 @@ export default class HlsManager {
     for (const video of videos) {
       if (video.directPlaySupported || !config.hlsEnabled) {
         this.states.set(video.id, "not_needed");
+        this.errors.delete(video.id);
         continue;
       }
 
@@ -38,6 +41,7 @@ export default class HlsManager {
 
     if (await this.isReady(video)) {
       this.states.set(video.id, "ready");
+      this.errors.delete(video.id);
       return { outputDir, playlistPath };
     }
 
@@ -47,11 +51,16 @@ export default class HlsManager {
       await job.ready;
     }
 
+    if (this.states.get(video.id) === "error") {
+      throw new Error(this.errors.get(video.id) || "HLS generation failed");
+    }
+
     if (!(await this.isReady(video))) {
       throw new Error("HLS playlist is not ready yet");
     }
 
     this.states.set(video.id, "ready");
+    this.errors.delete(video.id);
     return { outputDir, playlistPath };
   }
 
@@ -61,6 +70,7 @@ export default class HlsManager {
 
     if (await this.isReady(video)) {
       this.states.set(video.id, "ready");
+      this.errors.delete(video.id);
       return;
     }
 
@@ -69,6 +79,7 @@ export default class HlsManager {
       await fs.rm(outputDir, { recursive: true, force: true });
       await fs.mkdir(outputDir, { recursive: true });
       this.states.set(video.id, "preparing");
+      this.errors.delete(video.id);
       job = this.createJob(video, playlistPath);
       this.jobs.set(video.id, job);
     }
@@ -87,11 +98,12 @@ export default class HlsManager {
 
         await this.writeMetadata(video);
         this.states.set(video.id, "ready");
+        this.errors.delete(video.id);
       })
       .catch(async (error: unknown) => {
         this.states.set(video.id, "error");
+        this.errors.set(video.id, error instanceof Error ? error.message : "HLS generation failed");
         await fs.rm(outputDir, { recursive: true, force: true });
-        throw error;
       })
       .finally(() => {
         this.jobs.delete(video.id);
@@ -115,6 +127,7 @@ export default class HlsManager {
       if (!validIds.has(entry.name)) {
         await fs.rm(path.join(config.hlsPath, entry.name), { recursive: true, force: true });
         this.states.delete(entry.name);
+        this.errors.delete(entry.name);
         this.jobs.delete(entry.name);
       }
     }

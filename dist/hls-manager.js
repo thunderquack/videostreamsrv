@@ -10,12 +10,14 @@ const ffmpeg_1 = require("./ffmpeg");
 class HlsManager {
     jobs = new Map();
     states = new Map();
+    errors = new Map();
     async sync(videos) {
         const knownIds = new Set(videos.map((video) => video.id));
         await this.cleanupRemovedEntries(knownIds);
         for (const video of videos) {
             if (video.directPlaySupported || !config_1.default.hlsEnabled) {
                 this.states.set(video.id, "not_needed");
+                this.errors.delete(video.id);
                 continue;
             }
             await this.ensurePrepared(video);
@@ -32,6 +34,7 @@ class HlsManager {
         const playlistPath = node_path_1.default.join(outputDir, "master.m3u8");
         if (await this.isReady(video)) {
             this.states.set(video.id, "ready");
+            this.errors.delete(video.id);
             return { outputDir, playlistPath };
         }
         await this.ensurePrepared(video);
@@ -39,10 +42,14 @@ class HlsManager {
         if (job) {
             await job.ready;
         }
+        if (this.states.get(video.id) === "error") {
+            throw new Error(this.errors.get(video.id) || "HLS generation failed");
+        }
         if (!(await this.isReady(video))) {
             throw new Error("HLS playlist is not ready yet");
         }
         this.states.set(video.id, "ready");
+        this.errors.delete(video.id);
         return { outputDir, playlistPath };
     }
     async ensurePrepared(video) {
@@ -50,6 +57,7 @@ class HlsManager {
         const playlistPath = this.getPlaylistPath(video.id);
         if (await this.isReady(video)) {
             this.states.set(video.id, "ready");
+            this.errors.delete(video.id);
             return;
         }
         let job = this.jobs.get(video.id);
@@ -57,6 +65,7 @@ class HlsManager {
             await promises_1.default.rm(outputDir, { recursive: true, force: true });
             await promises_1.default.mkdir(outputDir, { recursive: true });
             this.states.set(video.id, "preparing");
+            this.errors.delete(video.id);
             job = this.createJob(video, playlistPath);
             this.jobs.set(video.id, job);
         }
@@ -72,11 +81,12 @@ class HlsManager {
             }
             await this.writeMetadata(video);
             this.states.set(video.id, "ready");
+            this.errors.delete(video.id);
         })
             .catch(async (error) => {
             this.states.set(video.id, "error");
+            this.errors.set(video.id, error instanceof Error ? error.message : "HLS generation failed");
             await promises_1.default.rm(outputDir, { recursive: true, force: true });
-            throw error;
         })
             .finally(() => {
             this.jobs.delete(video.id);
@@ -95,6 +105,7 @@ class HlsManager {
             if (!validIds.has(entry.name)) {
                 await promises_1.default.rm(node_path_1.default.join(config_1.default.hlsPath, entry.name), { recursive: true, force: true });
                 this.states.delete(entry.name);
+                this.errors.delete(entry.name);
                 this.jobs.delete(entry.name);
             }
         }
