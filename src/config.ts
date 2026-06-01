@@ -21,6 +21,7 @@ const config: AppConfig = {
   thumbnailsPath: path.resolve(cacheRoot, "thumbs"),
   hlsPath: path.resolve(cacheRoot, "hls"),
   thumbnailTimestamp: Number(process.env.THUMBNAIL_TIMESTAMP || 15),
+  scanIntervalMs: Number(process.env.SCAN_INTERVAL_MS || 10000),
   hlsEnabled: parseBoolean(process.env.HLS_ENABLED, true)
 };
 

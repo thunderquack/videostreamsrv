@@ -17,6 +17,7 @@ async function main(): Promise<void> {
 
   await library.init();
   await hlsManager.sync(library.getItems());
+  startBackgroundWorker(library, hlsManager);
 
   app.use(morgan("dev"));
   app.use(express.json());
@@ -32,8 +33,7 @@ async function main(): Promise<void> {
 
   app.post("/api/rescan", async (_req: Request, res: Response<VideosResponse>, next: NextFunction) => {
     try {
-      const items = await library.scan();
-      await hlsManager.sync(items);
+      const items = await runSyncCycle(library, hlsManager);
       res.json({
         items: serializeItems(items, hlsManager),
         status: library.getStatus()
@@ -119,7 +119,7 @@ async function main(): Promise<void> {
 
 function serializeItems(items: LibraryItem[], hlsManager: HlsManager): PublicLibraryItem[] {
   return items.map((item) => {
-    const fallbackStatus = hlsManager.getState(item);
+    const cacheState = hlsManager.getState(item);
 
     return {
       id: item.id,
@@ -132,11 +132,52 @@ function serializeItems(items: LibraryItem[], hlsManager: HlsManager): PublicLib
       thumbnailUrl: item.thumbnailExists ? `/thumbs/${item.id}.jpg` : null,
       streamUrl: `/stream/${item.id}`,
       hlsUrl: config.hlsEnabled ? `/hls/${item.id}/master.m3u8` : null,
-      fallbackStatus,
-      fallbackReady: fallbackStatus === "ready" || fallbackStatus === "not_needed",
-      fallbackPreparing: fallbackStatus === "preparing"
+      cacheStatus: cacheState.status,
+      cacheProgress: cacheState.progress,
+      playEnabled: cacheState.status === "ready"
     };
   });
+}
+
+function startBackgroundWorker(library: VideoLibrary, hlsManager: HlsManager): void {
+  let running = false;
+
+  const tick = async (): Promise<void> => {
+    if (running) {
+      return;
+    }
+
+    running = true;
+    try {
+      await runSyncCycle(library, hlsManager);
+    } catch (error) {
+      console.error("Background sync failed", error);
+    } finally {
+      running = false;
+    }
+  };
+
+  setInterval(() => {
+    void tick();
+  }, config.scanIntervalMs);
+}
+
+async function runSyncCycle(library: VideoLibrary, hlsManager: HlsManager): Promise<LibraryItem[]> {
+  const previousItems = library.getItems();
+  const items = await library.scan();
+  await cleanupRemovedThumbnails(previousItems, items);
+  await hlsManager.sync(items);
+  return items;
+}
+
+async function cleanupRemovedThumbnails(previousItems: LibraryItem[], currentItems: LibraryItem[]): Promise<void> {
+  const currentIds = new Set(currentItems.map((item) => item.id));
+
+  for (const item of previousItems) {
+    if (!currentIds.has(item.id)) {
+      await fs.promises.rm(path.join(config.thumbnailsPath, `${item.id}.jpg`), { force: true });
+    }
+  }
 }
 
 function serveRangeFile(filePath: string, res: Response, rangeHeader: string | undefined): void {

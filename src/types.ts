@@ -5,6 +5,7 @@ export interface AppConfig {
   thumbnailsPath: string;
   hlsPath: string;
   thumbnailTimestamp: number;
+  scanIntervalMs: number;
   hlsEnabled: boolean;
 }
 
@@ -20,7 +21,7 @@ export interface LibraryItem {
   thumbnailExists: boolean;
 }
 
-export type FallbackStatus = "not_needed" | "preparing" | "ready" | "error";
+export type CacheStatus = "queued" | "preparing" | "ready" | "error";
 
 export interface PublicLibraryItem {
   id: string;
@@ -33,9 +34,9 @@ export interface PublicLibraryItem {
   thumbnailUrl: string | null;
   streamUrl: string;
   hlsUrl: string | null;
-  fallbackStatus: FallbackStatus;
-  fallbackReady: boolean;
-  fallbackPreparing: boolean;
+  cacheStatus: CacheStatus;
+  cacheProgress: number | null;
+  playEnabled: boolean;
 }
 
 export interface LibraryStatus {
@@ -54,6 +55,12 @@ export interface HealthResponse extends LibraryStatus {
 
 export interface HlsJob {
   ready: Promise<void>;
+}
+
+export interface CacheState {
+  status: CacheStatus;
+  progress: number | null;
+  error: string | null;
 }
 
 export interface HlsCacheMetadata {

@@ -32,12 +32,11 @@ export default class VideoLibrary {
       const id = createVideoId(file.name);
       const thumbnailPath = path.join(config.thumbnailsPath, `${id}.jpg`);
       const durationSeconds = await probeDuration(absolutePath);
+      const thumbnailTimestamp = getThumbnailTimestamp(durationSeconds);
 
-      try {
-        await fs.access(thumbnailPath);
-      } catch {
+      if (await shouldGenerateThumbnail(thumbnailPath, stats.mtimeMs)) {
         try {
-          await ensureThumbnail(absolutePath, thumbnailPath, config.thumbnailTimestamp);
+          await ensureThumbnail(absolutePath, thumbnailPath, thumbnailTimestamp);
         } catch {
           // Keep the item even if thumbnail generation fails.
         }
@@ -86,4 +85,21 @@ async function fileExists(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function shouldGenerateThumbnail(thumbnailPath: string, sourceMtimeMs: number): Promise<boolean> {
+  try {
+    const thumbnailStats = await fs.stat(thumbnailPath);
+    return thumbnailStats.mtimeMs < sourceMtimeMs;
+  } catch {
+    return true;
+  }
+}
+
+function getThumbnailTimestamp(durationSeconds: number | null): number {
+  if (Number.isFinite(durationSeconds) && durationSeconds !== null && durationSeconds > 0) {
+    return Math.max(1, durationSeconds / 2);
+  }
+
+  return config.thumbnailTimestamp;
 }

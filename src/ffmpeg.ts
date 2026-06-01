@@ -103,6 +103,9 @@ export function spawnHls(inputPath: string, outputPlaylistPath: string): HlsProc
       "independent_segments",
       "-hls_segment_filename",
       outputPlaylistPath.replace("master.m3u8", "segment-%03d.ts"),
+      "-progress",
+      "pipe:1",
+      "-nostats",
       outputPlaylistPath
     ],
     {
@@ -131,4 +134,39 @@ export function spawnHls(inputPath: string, outputPlaylistPath: string): HlsProc
     process: child,
     done
   };
+}
+
+export function parseFfmpegTimestampToSeconds(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (/^\d+$/.test(trimmed)) {
+    const numeric = Number(trimmed);
+    if (!Number.isFinite(numeric)) {
+      return null;
+    }
+
+    if (trimmed.endsWith("000") && numeric > 1000000) {
+      return numeric / 1000000;
+    }
+
+    return numeric / 1000000;
+  }
+
+  const match = trimmed.match(/^(\d+):(\d+):(\d+(?:\.\d+)?)$/);
+  if (!match) {
+    return null;
+  }
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3]);
+
+  if (![hours, minutes, seconds].every(Number.isFinite)) {
+    return null;
+  }
+
+  return hours * 3600 + minutes * 60 + seconds;
 }
