@@ -30,9 +30,11 @@ class VideoLibrary {
             const thumbnailPath = node_path_1.default.join(config_1.default.thumbnailsPath, `${id}.jpg`);
             const durationSeconds = await (0, ffmpeg_1.probeDuration)(absolutePath);
             const thumbnailTimestamp = getThumbnailTimestamp(durationSeconds);
-            if (await shouldGenerateThumbnail(thumbnailPath, stats.mtimeMs)) {
+            const thumbnailMetadataPath = node_path_1.default.join(config_1.default.thumbnailsPath, `${id}.json`);
+            if (await shouldGenerateThumbnail(thumbnailPath, thumbnailMetadataPath, absolutePath, stats.size, stats.mtime.toISOString(), thumbnailTimestamp)) {
                 try {
                     await (0, ffmpeg_1.ensureThumbnail)(absolutePath, thumbnailPath, thumbnailTimestamp);
+                    await writeThumbnailMetadata(thumbnailMetadataPath, absolutePath, stats.size, stats.mtime.toISOString(), thumbnailTimestamp);
                 }
                 catch {
                     // Keep the item even if thumbnail generation fails.
@@ -79,10 +81,15 @@ async function fileExists(filePath) {
         return false;
     }
 }
-async function shouldGenerateThumbnail(thumbnailPath, sourceMtimeMs) {
+async function shouldGenerateThumbnail(thumbnailPath, thumbnailMetadataPath, sourcePath, sourceSize, sourceModifiedAt, timestampSeconds) {
     try {
-        const thumbnailStats = await promises_1.default.stat(thumbnailPath);
-        return thumbnailStats.mtimeMs < sourceMtimeMs;
+        await promises_1.default.access(thumbnailPath);
+        const metadataRaw = await promises_1.default.readFile(thumbnailMetadataPath, "utf8");
+        const metadata = JSON.parse(metadataRaw);
+        return !(metadata.sourcePath === sourcePath &&
+            metadata.size === sourceSize &&
+            metadata.modifiedAt === sourceModifiedAt &&
+            Math.abs(metadata.timestampSeconds - timestampSeconds) < 0.01);
     }
     catch {
         return true;
@@ -93,4 +100,13 @@ function getThumbnailTimestamp(durationSeconds) {
         return Math.max(1, durationSeconds / 2);
     }
     return config_1.default.thumbnailTimestamp;
+}
+async function writeThumbnailMetadata(thumbnailMetadataPath, sourcePath, sourceSize, sourceModifiedAt, timestampSeconds) {
+    const metadata = {
+        sourcePath,
+        size: sourceSize,
+        modifiedAt: sourceModifiedAt,
+        timestampSeconds
+    };
+    await promises_1.default.writeFile(thumbnailMetadataPath, JSON.stringify(metadata), "utf8");
 }
