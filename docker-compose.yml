@@ -1,6 +1,7 @@
 services:
   videostreamsrv:
     build: .
+    container_name: video-stream
     environment:
       PORT: 3000
       VIDEO_LIBRARY_PATH: /library
@@ -10,3 +11,9 @@ services:
     volumes:
       - ./videos:/library:ro
       - ./cache:/cache
+    networks:
+      - ptfin-backend
+
+networks:
+  ptfin-backend:
+    external: true
