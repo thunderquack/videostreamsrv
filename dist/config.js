@@ -19,6 +19,7 @@ const config = {
     thumbnailsPath: node_path_1.default.resolve(cacheRoot, "thumbs"),
     hlsPath: node_path_1.default.resolve(cacheRoot, "hls"),
     thumbnailTimestamp: Number(process.env.THUMBNAIL_TIMESTAMP || 15),
+    scanIntervalMs: Number(process.env.SCAN_INTERVAL_MS || 10000),
     hlsEnabled: parseBoolean(process.env.HLS_ENABLED, true)
 };
 exports.default = config;

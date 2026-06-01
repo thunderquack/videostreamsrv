@@ -10,86 +10,106 @@ const ffmpeg_1 = require("./ffmpeg");
 class HlsManager {
     jobs = new Map();
     states = new Map();
-    errors = new Map();
+    queue = [];
+    activeProcess = null;
+    activeJobId = null;
+    videos = new Map();
     async sync(videos) {
         const knownIds = new Set(videos.map((video) => video.id));
+        const previousIds = new Set(this.videos.keys());
+        this.videos = new Map(videos.map((video) => [video.id, video]));
         await this.cleanupRemovedEntries(knownIds);
         for (const video of videos) {
-            if (video.directPlaySupported || !config_1.default.hlsEnabled) {
-                this.states.set(video.id, "not_needed");
-                this.errors.delete(video.id);
-                continue;
-            }
-            await this.ensurePrepared(video);
+            await this.syncVideo(video);
         }
+        for (const previousId of previousIds) {
+            if (!knownIds.has(previousId)) {
+                this.videos.delete(previousId);
+            }
+        }
+        this.pumpQueue();
     }
     getState(video) {
-        if (!config_1.default.hlsEnabled || video.directPlaySupported) {
-            return "not_needed";
-        }
-        return this.states.get(video.id) || "preparing";
+        return this.states.get(video.id) || {
+            status: "queued",
+            progress: 0,
+            error: null
+        };
     }
     async ensureReady(video) {
         const outputDir = node_path_1.default.join(config_1.default.hlsPath, video.id);
         const playlistPath = node_path_1.default.join(outputDir, "master.m3u8");
         if (await this.isReady(video)) {
-            this.states.set(video.id, "ready");
-            this.errors.delete(video.id);
+            this.setState(video.id, "ready", 100, null);
             return { outputDir, playlistPath };
         }
-        await this.ensurePrepared(video);
+        await this.syncVideo(video);
+        this.pumpQueue();
         const job = this.jobs.get(video.id);
         if (job) {
             await job.ready;
         }
-        if (this.states.get(video.id) === "error") {
-            throw new Error(this.errors.get(video.id) || "HLS generation failed");
+        const state = this.getState(video);
+        if (state.status === "error") {
+            throw new Error(state.error || "HLS generation failed");
         }
         if (!(await this.isReady(video))) {
             throw new Error("HLS playlist is not ready yet");
         }
-        this.states.set(video.id, "ready");
-        this.errors.delete(video.id);
+        this.setState(video.id, "ready", 100, null);
         return { outputDir, playlistPath };
     }
-    async ensurePrepared(video) {
-        const outputDir = this.getOutputDir(video.id);
-        const playlistPath = this.getPlaylistPath(video.id);
-        if (await this.isReady(video)) {
-            this.states.set(video.id, "ready");
-            this.errors.delete(video.id);
+    async syncVideo(video) {
+        const state = this.states.get(video.id);
+        const ready = await this.isReady(video);
+        if (ready) {
+            this.dequeue(video.id);
+            this.setState(video.id, "ready", 100, null);
             return;
         }
-        let job = this.jobs.get(video.id);
-        if (!job) {
-            await promises_1.default.rm(outputDir, { recursive: true, force: true });
-            await promises_1.default.mkdir(outputDir, { recursive: true });
-            this.states.set(video.id, "preparing");
-            this.errors.delete(video.id);
-            job = this.createJob(video, playlistPath);
-            this.jobs.set(video.id, job);
+        if (this.activeJobId === video.id && state?.status === "preparing") {
+            return;
         }
+        if (state?.status === "queued") {
+            return;
+        }
+        this.enqueue(video.id);
+        this.setState(video.id, "queued", 0, null);
     }
     createJob(video, playlistPath) {
         const outputDir = this.getOutputDir(video.id);
         const { process, done } = (0, ffmpeg_1.spawnHls)(video.path, playlistPath);
+        this.activeProcess = process;
+        this.activeJobId = video.id;
+        this.attachProgressListener(video, process);
         const ready = done
             .then(async () => {
             const playlist = await promises_1.default.readFile(playlistPath, "utf8");
             if (!playlist.includes("#EXT-X-ENDLIST")) {
                 throw new Error("Generated HLS playlist is incomplete");
             }
+            if (!this.videos.has(video.id)) {
+                await promises_1.default.rm(outputDir, { recursive: true, force: true });
+                return;
+            }
             await this.writeMetadata(video);
-            this.states.set(video.id, "ready");
-            this.errors.delete(video.id);
+            this.setState(video.id, "ready", 100, null);
         })
             .catch(async (error) => {
-            this.states.set(video.id, "error");
-            this.errors.set(video.id, error instanceof Error ? error.message : "HLS generation failed");
+            if (!this.videos.has(video.id)) {
+                await promises_1.default.rm(outputDir, { recursive: true, force: true });
+                return;
+            }
+            this.setState(video.id, "error", 0, error instanceof Error ? error.message : "HLS generation failed");
             await promises_1.default.rm(outputDir, { recursive: true, force: true });
         })
             .finally(() => {
             this.jobs.delete(video.id);
+            if (this.activeJobId === video.id) {
+                this.activeJobId = null;
+                this.activeProcess = null;
+            }
+            this.pumpQueue();
         });
         process.stderr.on("data", () => {
             // ffmpeg logs are intentionally suppressed during normal operation.
@@ -103,9 +123,14 @@ class HlsManager {
                 continue;
             }
             if (!validIds.has(entry.name)) {
+                if (this.activeJobId === entry.name && this.activeProcess) {
+                    this.activeProcess.kill("SIGTERM");
+                    this.activeJobId = null;
+                    this.activeProcess = null;
+                }
+                this.dequeue(entry.name);
                 await promises_1.default.rm(node_path_1.default.join(config_1.default.hlsPath, entry.name), { recursive: true, force: true });
                 this.states.delete(entry.name);
-                this.errors.delete(entry.name);
                 this.jobs.delete(entry.name);
             }
         }
@@ -144,6 +169,72 @@ class HlsManager {
     }
     getMetadataPath(id) {
         return node_path_1.default.join(this.getOutputDir(id), "source.json");
+    }
+    enqueue(id) {
+        if (!this.queue.includes(id)) {
+            this.queue.push(id);
+        }
+    }
+    dequeue(id) {
+        this.queue = this.queue.filter((queuedId) => queuedId !== id);
+    }
+    pumpQueue() {
+        if (this.activeJobId || !config_1.default.hlsEnabled) {
+            return;
+        }
+        const nextId = this.queue.shift();
+        if (!nextId) {
+            return;
+        }
+        const video = this.videos.get(nextId);
+        if (!video) {
+            this.states.delete(nextId);
+            this.pumpQueue();
+            return;
+        }
+        void this.startJob(video);
+    }
+    async startJob(video) {
+        const outputDir = this.getOutputDir(video.id);
+        const playlistPath = this.getPlaylistPath(video.id);
+        await promises_1.default.rm(outputDir, { recursive: true, force: true });
+        await promises_1.default.mkdir(outputDir, { recursive: true });
+        this.setState(video.id, "preparing", 0, null);
+        const job = this.createJob(video, playlistPath);
+        this.jobs.set(video.id, job);
+    }
+    attachProgressListener(video, process) {
+        let buffer = "";
+        const durationSeconds = video.durationSeconds;
+        process.stdout.on("data", (chunk) => {
+            buffer += chunk.toString();
+            const lines = buffer.split(/\r?\n/);
+            buffer = lines.pop() || "";
+            for (const line of lines) {
+                const [key, ...valueParts] = line.split("=");
+                const value = valueParts.join("=");
+                if (!key || !value) {
+                    continue;
+                }
+                if (key === "out_time_ms" || key === "out_time_us" || key === "out_time") {
+                    const currentSeconds = (0, ffmpeg_1.parseFfmpegTimestampToSeconds)(value);
+                    if (currentSeconds !== null &&
+                        durationSeconds !== null &&
+                        Number.isFinite(durationSeconds) &&
+                        durationSeconds > 0) {
+                        const progress = Math.max(0, Math.min(99, Math.round((currentSeconds / durationSeconds) * 100)));
+                        this.setState(video.id, "preparing", progress, null);
+                    }
+                }
+            }
+        });
+    }
+    setState(id, status, progress, error) {
+        this.states.set(id, {
+            status,
+            progress,
+            error
+        });
     }
 }
 exports.default = HlsManager;

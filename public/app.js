@@ -8854,9 +8854,9 @@ ${newDetails.m3u8}`);
       } else if ((retry || noAlternate) && retryCount < retryConfig.maxNumRetry) {
         var _data$response;
         const offlineStatus = offlineHttpStatus((_data$response = data.response) == null ? void 0 : _data$response.code);
-        const delay2 = getRetryDelay(retryConfig, retryCount);
+        const delay = getRetryDelay(retryConfig, retryCount);
         this.resetStartWhenNotLoaded();
-        this.retryDate = self.performance.now() + delay2;
+        this.retryDate = self.performance.now() + delay;
         this.state = State.FRAG_LOADING_WAITING_RETRY;
         errorAction.resolved = true;
         if (offlineStatus) {
@@ -8865,7 +8865,7 @@ ${newDetails.m3u8}`);
           data.reason = "offline";
           return;
         }
-        this.warn(`Fragment ${frag.sn} of ${filterType} ${frag.level} errored with ${data.details}, retrying loading ${retryCount + 1}/${retryConfig.maxNumRetry} in ${delay2}ms`);
+        this.warn(`Fragment ${frag.sn} of ${filterType} ${frag.level} errored with ${data.details}, retrying loading ${retryCount + 1}/${retryConfig.maxNumRetry} in ${delay}ms`);
       } else if (retryConfig) {
         this.resetFragmentErrors(filterType);
         if (retryCount < retryConfig.maxNumRetry) {
@@ -16366,10 +16366,10 @@ ${newDetails.m3u8}`);
           this.warn(`Retrying playlist loading ${retryCount + 1}/${retryConfig.maxNumRetry} after "${errorDetails}" without delivery-directives`);
           this.loadPlaylist();
         } else {
-          const delay2 = getRetryDelay(retryConfig, retryCount);
+          const delay = getRetryDelay(retryConfig, retryCount);
           this.clearTimer();
-          this.timer = self.setTimeout(() => this.loadPlaylist(), delay2);
-          this.warn(`Retrying playlist loading ${retryCount + 1}/${retryConfig.maxNumRetry} after "${errorDetails}" in ${delay2}ms`);
+          this.timer = self.setTimeout(() => this.loadPlaylist(), delay);
+          this.warn(`Retrying playlist loading ${retryCount + 1}/${retryConfig.maxNumRetry} after "${errorDetails}" in ${delay}ms`);
         }
         errorEvent.levelRetry = true;
         errorAction.resolved = true;
@@ -33034,10 +33034,16 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
   var playerMode = getRequiredElement("playerMode");
   var currentHls = null;
   var currentPlaybackRequest = 0;
+  var latestItems = [];
+  var pollingHandle = null;
   async function loadVideos() {
-    setStatus("Loading library...");
+    const showLoading = latestItems.length === 0;
+    if (showLoading) {
+      setStatus("Loading library...");
+    }
     const response = await fetch("/api/videos");
     const payload = await response.json();
+    latestItems = payload.items;
     renderStatus(payload.status, payload.items.length);
     renderGallery(payload.items);
   }
@@ -33047,6 +33053,7 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     try {
       const response = await fetch("/api/rescan", { method: "POST" });
       const payload = await response.json();
+      latestItems = payload.items;
       renderStatus(payload.status, payload.items.length);
       renderGallery(payload.items);
     } finally {
@@ -33074,8 +33081,8 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       </div>
       <div class="card-content">
         <h2 class="card-title">${escapeHtml(item.filename)}</h2>
-        <p class="card-meta">${item.durationLabel || "Unknown duration"}${item.directPlaySupported ? " \u2022 Direct play" : item.fallbackPreparing ? " \u2022 Preparing HLS" : item.fallbackStatus === "error" ? " \u2022 HLS error" : " \u2022 HLS fallback"}</p>
-        <button class="play-button" data-video-id="${item.id}">Play</button>
+        <p class="card-meta">${item.durationLabel || "Unknown duration"} \u2022 ${describeCacheStatus(item)}</p>
+        <button class="play-button${item.playEnabled ? "" : " is-disabled"}" data-video-id="${item.id}" ${item.playEnabled ? "" : "disabled"}>${item.playEnabled ? "Play" : describePlayLabel(item)}</button>
       </div>
     </article>
   `
@@ -33090,8 +33097,10 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
   }
   async function openPlayer(item) {
+    if (!item.playEnabled) {
+      return;
+    }
     currentPlaybackRequest += 1;
-    const requestId = currentPlaybackRequest;
     destroyHls();
     player.pause();
     player.removeAttribute("src");
@@ -33116,16 +33125,6 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     }
     if (!item.hlsUrl) {
       playerMode.textContent = "No compatible playback mode available";
-      return;
-    }
-    if (!item.fallbackReady) {
-      playerMode.textContent = item.fallbackPreparing ? "Preparing full video for seeking..." : "Waiting for HLS fallback to become ready...";
-      const readyItem = await waitForFallbackReady(item.id, requestId);
-      if (!readyItem) {
-        return;
-      }
-      playerMode.textContent = "Starting HLS fallback";
-      await startHls(readyItem.hlsUrl || item.hlsUrl);
       return;
     }
     playerMode.textContent = "Starting HLS fallback";
@@ -33166,28 +33165,42 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
       currentHls = null;
     }
   }
-  async function waitForFallbackReady(id, requestId) {
-    while (requestId === currentPlaybackRequest && !modal.classList.contains("hidden")) {
-      const response = await fetch("/api/videos");
-      const payload = await response.json();
-      const item = payload.items.find((entry) => entry.id === id);
-      if (!item) {
-        playerMode.textContent = "Video is no longer available";
-        return null;
-      }
-      if (item.fallbackStatus === "error") {
-        playerMode.textContent = "Failed to prepare fallback video";
-        return null;
-      }
-      if (item.fallbackReady && item.hlsUrl) {
-        return item;
-      }
-      await delay(2e3);
+  function describeCacheStatus(item) {
+    if (item.cacheStatus === "ready") {
+      return "Cached";
     }
-    return null;
+    if (item.cacheStatus === "error") {
+      return "Cache error";
+    }
+    if (item.cacheStatus === "queued") {
+      return "Queued";
+    }
+    if (item.cacheProgress !== null) {
+      return `Caching ${item.cacheProgress}%`;
+    }
+    return "Caching";
   }
-  function delay(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  function describePlayLabel(item) {
+    if (item.cacheStatus === "error") {
+      return "Cache Error";
+    }
+    if (item.cacheStatus === "queued") {
+      return "Queued";
+    }
+    if (item.cacheProgress !== null) {
+      return `Caching ${item.cacheProgress}%`;
+    }
+    return "Caching";
+  }
+  function startPolling() {
+    if (pollingHandle !== null) {
+      return;
+    }
+    pollingHandle = window.setInterval(() => {
+      void loadVideos().catch((error) => {
+        console.error(error);
+      });
+    }, 2e3);
   }
   function escapeHtml(value) {
     return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
@@ -33213,4 +33226,5 @@ Schedule: ${scheduleItems.map((seg) => segmentToString(seg))} pos: ${this.timeli
     console.error(error);
     setStatus("Failed to load library");
   });
+  startPolling();
 })();

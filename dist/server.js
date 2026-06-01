@@ -17,6 +17,7 @@ async function main() {
     const hlsManager = new hls_manager_1.default();
     await library.init();
     await hlsManager.sync(library.getItems());
+    startBackgroundWorker(library, hlsManager);
     app.use((0, morgan_1.default)("dev"));
     app.use(express_1.default.json());
     app.use(express_1.default.static(node_path_1.default.join(__dirname, "..", "public")));
@@ -29,8 +30,7 @@ async function main() {
     });
     app.post("/api/rescan", async (_req, res, next) => {
         try {
-            const items = await library.scan();
-            await hlsManager.sync(items);
+            const items = await runSyncCycle(library, hlsManager);
             res.json({
                 items: serializeItems(items, hlsManager),
                 status: library.getStatus()
@@ -106,7 +106,7 @@ async function main() {
 }
 function serializeItems(items, hlsManager) {
     return items.map((item) => {
-        const fallbackStatus = hlsManager.getState(item);
+        const cacheState = hlsManager.getState(item);
         return {
             id: item.id,
             filename: item.filename,
@@ -118,11 +118,47 @@ function serializeItems(items, hlsManager) {
             thumbnailUrl: item.thumbnailExists ? `/thumbs/${item.id}.jpg` : null,
             streamUrl: `/stream/${item.id}`,
             hlsUrl: config_1.default.hlsEnabled ? `/hls/${item.id}/master.m3u8` : null,
-            fallbackStatus,
-            fallbackReady: fallbackStatus === "ready" || fallbackStatus === "not_needed",
-            fallbackPreparing: fallbackStatus === "preparing"
+            cacheStatus: cacheState.status,
+            cacheProgress: cacheState.progress,
+            playEnabled: cacheState.status === "ready"
         };
     });
+}
+function startBackgroundWorker(library, hlsManager) {
+    let running = false;
+    const tick = async () => {
+        if (running) {
+            return;
+        }
+        running = true;
+        try {
+            await runSyncCycle(library, hlsManager);
+        }
+        catch (error) {
+            console.error("Background sync failed", error);
+        }
+        finally {
+            running = false;
+        }
+    };
+    setInterval(() => {
+        void tick();
+    }, config_1.default.scanIntervalMs);
+}
+async function runSyncCycle(library, hlsManager) {
+    const previousItems = library.getItems();
+    const items = await library.scan();
+    await cleanupRemovedThumbnails(previousItems, items);
+    await hlsManager.sync(items);
+    return items;
+}
+async function cleanupRemovedThumbnails(previousItems, currentItems) {
+    const currentIds = new Set(currentItems.map((item) => item.id));
+    for (const item of previousItems) {
+        if (!currentIds.has(item.id)) {
+            await node_fs_1.default.promises.rm(node_path_1.default.join(config_1.default.thumbnailsPath, `${item.id}.jpg`), { force: true });
+        }
+    }
 }
 function serveRangeFile(filePath, res, rangeHeader) {
     const stat = node_fs_1.default.statSync(filePath);
