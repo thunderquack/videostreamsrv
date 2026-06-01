@@ -1,3 +1,5 @@
+import Hls from "hls.js/dist/hls.mjs";
+
 interface PublicLibraryItem {
   id: string;
   filename: string;
@@ -24,27 +26,6 @@ interface VideosResponse {
   status: LibraryStatus;
 }
 
-interface HlsInstance {
-  loadSource(url: string): void;
-  attachMedia(media: HTMLVideoElement): void;
-  on(event: string, handler: () => void | Promise<void>): void;
-  destroy(): void;
-}
-
-interface HlsConstructor {
-  new (): HlsInstance;
-  isSupported(): boolean;
-  Events: {
-    MANIFEST_PARSED: string;
-  };
-}
-
-declare global {
-  interface Window {
-    Hls?: HlsConstructor;
-  }
-}
-
 export {};
 
 const gallery = getRequiredElement<HTMLDivElement>("gallery");
@@ -57,7 +38,7 @@ const playerTitle = getRequiredElement<HTMLElement>("playerTitle");
 const playerMeta = getRequiredElement<HTMLElement>("playerMeta");
 const playerMode = getRequiredElement<HTMLElement>("playerMode");
 
-let currentHls: HlsInstance | null = null;
+let currentHls: Hls | null = null;
 let currentPlaybackRequest = 0;
 
 async function loadVideos(): Promise<void> {
@@ -191,9 +172,7 @@ async function openPlayer(item: PublicLibraryItem): Promise<void> {
 }
 
 async function startHls(url: string): Promise<void> {
-  const Hls = window.Hls;
-
-  if (Hls && Hls.isSupported()) {
+  if (Hls.isSupported()) {
     const hls = new Hls();
     currentHls = hls;
     hls.loadSource(url);

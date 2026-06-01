@@ -1,5 +1,9 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
+const hls_mjs_1 = __importDefault(require("hls.js/dist/hls.mjs"));
 const gallery = getRequiredElement("gallery");
 const statusBox = getRequiredElement("status");
 const rescanButton = getRequiredElement("rescanButton");
@@ -122,13 +126,12 @@ async function openPlayer(item) {
     await startHls(item.hlsUrl);
 }
 async function startHls(url) {
-    const Hls = window.Hls;
-    if (Hls && Hls.isSupported()) {
-        const hls = new Hls();
+    if (hls_mjs_1.default.isSupported()) {
+        const hls = new hls_mjs_1.default();
         currentHls = hls;
         hls.loadSource(url);
         hls.attachMedia(player);
-        hls.on(Hls.Events.MANIFEST_PARSED, async () => {
+        hls.on(hls_mjs_1.default.Events.MANIFEST_PARSED, async () => {
             await player.play();
             playerMode.textContent = "Playing HLS fallback";
         });
