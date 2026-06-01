@@ -1,0 +1,14 @@
+services:
+  videostreamsrv:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      VIDEO_LIBRARY_PATH: /library
+      CACHE_PATH: /cache
+      THUMBNAIL_TIMESTAMP: 15
+      HLS_ENABLED: "true"
+    volumes:
+      - ./videos:/library:ro
+      - ./cache:/cache
